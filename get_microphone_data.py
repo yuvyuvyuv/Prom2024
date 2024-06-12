@@ -1,15 +1,13 @@
 import sounddevice as sd
 import numpy as np
-from scipy.signal import butter, filtfilt, spectrogram, find_peaks
+from scipy.signal import butter, filtfilt, spectrogram
 import matplotlib.pyplot as plt
 import time
 
 # Parameters
-duration = 5  # Duration of recording in seconds
-fs = 96000  # Increased sampling frequency
-bit_duration = 0.1  # Duration of each bit in seconds
-cutoff_low = 18000
-cutoff_high = 22000
+duration = 1  # Duration of recording in seconds
+fs = 44100  # Sampling frequency
+fs = 96000  # Sampling frequency
 
 # Function to design a high-pass filter
 def high_pass_filter(data, cutoff_low, cutoff_high, fs):
@@ -47,25 +45,6 @@ def record_audio(duration, fs):
     print(f"Recording complete. Duration: {elapsed_time:.2f} seconds")
     return data.flatten(), elapsed_time
 
-# Function to decode bits from the audio data
-def decode_bits(data, fs, bit_duration):
-    num_samples_per_bit = int(bit_duration * fs)
-    num_bits = len(data) // num_samples_per_bit
-    bits = []
-    
-    for i in range(num_bits):
-        segment = data[i * num_samples_per_bit:(i + 1) * num_samples_per_bit]
-        f, Pxx = plt.psd(segment, NFFT=1024, Fs=fs, scale_by_freq=False)
-        peak_idx = np.argmax(Pxx)
-        peak_freq = f[peak_idx]
-        
-        if abs(peak_freq - 20000) < abs(peak_freq - 19000):
-            bits.append('1')
-        else:
-            bits.append('0')
-    
-    return bits
-
 # Main function
 def main():
     data, elapsed_time = record_audio(duration, fs)
@@ -77,11 +56,7 @@ def main():
     print(f"Samples per second: {samples_per_second:.2f}")
     
     # Apply high-pass filter
-    filtered_data = high_pass_filter(data, cutoff_low, cutoff_high, fs)
-    
-    # Decode bits from the filtered data
-    bits = decode_bits(filtered_data, fs, bit_duration)
-    print(f"Decoded bits: {''.join(bits)}")
+    filtered_data = high_pass_filter(data, 18000, 22000, fs)
     
     # Calculate and plot spectrogram
     calculate_spectrogram(filtered_data, fs)
