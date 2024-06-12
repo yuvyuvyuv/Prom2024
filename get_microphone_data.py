@@ -1,6 +1,6 @@
 import sounddevice as sd
 import numpy as np
-from scipy.signal import butter, filtfilt, spectrogram, find_peaks, welch
+from scipy.signal import butter, filtfilt, spectrogram, welch
 import matplotlib.pyplot as plt
 import time
 
@@ -10,7 +10,6 @@ fs = 96000  # Sampling frequency
 bit_duration = 0.1  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
-threshold = 0.01  # Energy threshold for start detection
 
 # Function to design a bandpass filter
 def bandpass_filter(data, cutoff_low, cutoff_high, fs):
@@ -50,9 +49,9 @@ def record_audio(duration, fs):
     return data.flatten(), elapsed_time
 
 # Function to detect the start of the broadcast using an energy threshold
-def detect_start(data, fs, threshold=0.01):
+def detect_start(data, fs, energy_threshold=0.01):
     energy = np.convolve(data**2, np.ones(fs) / fs, mode='same')
-    start_idx = np.argmax(energy > threshold)
+    start_idx = np.argmax(energy > energy_threshold)
     return start_idx
 
 # Function to decode bits from the audio data
@@ -76,13 +75,6 @@ def decode_bits(data, fs, bit_duration):
     
     return bits
 
-# Function to refine bit detection
-def refine_bit_detection(data, fs, bit_duration, threshold):
-    start_idx = detect_start(data, fs, threshold)
-    filtered_data = data[start_idx:]
-    bits = decode_bits(filtered_data, fs, bit_duration)
-    return bits
-
 # Main function
 def main():
     data, elapsed_time = record_audio(duration, fs)
@@ -96,8 +88,13 @@ def main():
     # Apply bandpass filter
     filtered_data = bandpass_filter(data, cutoff_low, cutoff_high, fs)
     
-    # Refine bit detection
-    bits = refine_bit_detection(filtered_data, fs, bit_duration, threshold)
+    # Detect the start of the broadcast
+    start_idx = detect_start(filtered_data, fs)
+    filtered_data = filtered_data[start_idx:]
+    print(f"Detected broadcast start at sample index: {start_idx}")
+    
+    # Decode bits from the filtered data
+    bits = decode_bits(filtered_data, fs, bit_duration)
     print(f"Decoded bits: {''.join(bits)}")
     
     # Calculate and plot spectrogram
