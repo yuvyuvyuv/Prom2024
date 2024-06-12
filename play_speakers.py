@@ -2,46 +2,41 @@ import numpy as np
 import sounddevice as sd
 
 # Parameters
-fs = 44100  # Sampling frequency
-duration = 5  # Duration of the sound in seconds
-freq1 = 20000  # Frequency 1 in Hz
-freq2 = 18000  # Frequency 2 in Hz
-switch_rate = 100  # Number of times to switch between frequencies per second
+fs = 96000  # Sampling frequency
+bit_duration = 0.1  # Duration of each bit in seconds
+freq1 = 20000  # Frequency for '1' in Hz
+freq0 = 19000  # Frequency for '0' in Hz
 
-# Create the on-off pattern
-def create_switch_pattern(rate, fs, duration):
-    # Calculate the length of each on/off segment in samples
-    segment_length = fs // (2 * rate)
-    # Create one cycle of switching pattern
-    one_cycle = np.concatenate([np.ones(segment_length), np.zeros(segment_length)])
-    # Repeat the pattern to fill the entire duration
-    num_cycles = int(duration * rate)
-    pattern = np.tile(one_cycle, num_cycles)
-    # Trim the pattern to match the exact number of samples needed
-    return pattern[:int(duration * fs)]
-
-# Create the noise for a given frequency
-def create_noise(freq, fs, duration):
+# Function to create a sine wave for a given frequency
+def create_tone(freq, duration, fs):
     t = np.linspace(0, duration, int(fs * duration), endpoint=False)
-    noise = 0.5 * np.sin(2 * np.pi * freq * t)
-    return noise
+    tone = 0.5 * np.sin(2 * np.pi * freq * t)
+    return tone
+
+# Function to encode data as an audio signal
+def encode_data(data, bit_duration, fs, freq1, freq0):
+    signal = np.array([])
+    for bit in data:
+        if bit == '1':
+            tone = create_tone(freq1, bit_duration, fs)
+        elif bit == '0':
+            tone = create_tone(freq0, bit_duration, fs)
+        signal = np.concatenate((signal, tone))
+    return signal
 
 # Main function
 def main():
-    pattern = create_switch_pattern(switch_rate, fs, duration)
-    noise1 = create_noise(freq1, fs, duration)
-    noise2 = create_noise(freq2, fs, duration)
+    # Example data to encode
+    data = '1010100011001110'  # Example bit sequence
     
-    # Ensure both arrays have the same length
-    min_length = min(len(pattern), len(noise1), len(noise2))
-    pattern = pattern[:min_length]
-    noise1 = noise1[:min_length]
-    noise2 = noise2[:min_length]
+    # Encode the data
+    signal = encode_data(data, bit_duration, fs, freq1, freq0)
     
-    # Create the alternating signal
-    signal = np.where(pattern, noise1, noise2)
+    # Play the encoded signal
     sd.play(signal, fs)
     sd.wait()
+    
+    print(f"Encoded and played data: {data}")
 
 if __name__ == "__main__":
     main()
