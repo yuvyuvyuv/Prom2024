@@ -10,6 +10,8 @@ fs = 96000  # Sampling frequency
 bit_duration = 0.1  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
+threshold = 0.01  # Energy threshold for start detection
+bit_threshold = 5e-7  # Power threshold for bit detection
 
 # Function to design a bandpass filter
 def bandpass_filter(data, cutoff_low, cutoff_high, fs):
@@ -49,13 +51,19 @@ def record_audio(duration, fs):
     return data.flatten(), elapsed_time
 
 # Function to detect the start of the broadcast using an energy threshold
-def detect_start(data, fs, energy_threshold=0.01):
+def detect_start(data, fs, threshold=0.01):
     energy = np.convolve(data**2, np.ones(fs) / fs, mode='same')
-    start_idx = np.argmax(energy > energy_threshold)
+    start_idx = np.argmax(energy > threshold)
     return start_idx
 
-# Function to decode bits from the audio data
-def decode_bits(data, fs, bit_duration):
+# Function to detect the end of the broadcast using an energy threshold
+def detect_end(data, fs, threshold=0.01):
+    energy = np.convolve(data**2, np.ones(fs) / fs, mode='same')
+    end_idx = len(energy) - 1 - np.argmax((energy[::-1] > threshold))
+    return end_idx
+
+# Function to decode bits from the audio data using a power threshold
+def decode_bits_with_threshold(data, fs, bit_duration, bit_threshold):
     num_samples_per_bit = int(bit_duration * fs)
     num_bits = len(data) // num_samples_per_bit
     bits = []
@@ -68,11 +76,22 @@ def decode_bits(data, fs, bit_duration):
         peak_idx = np.argmax(Pxx)
         peak_freq = f[peak_idx]
         
-        if abs(peak_freq - 20000) < abs(peak_freq - 19000):
+        if Pxx[peak_idx] < bit_threshold:
+            pass
+            #bits.append('0')  # No significant power detected
+        elif abs(peak_freq - 20000) < abs(peak_freq - 19000):
             bits.append('1')
         else:
             bits.append('0')
     
+    return bits
+
+# Function to refine bit detection
+def refine_bit_detection(data, fs, bit_duration, threshold, bit_threshold):
+    start_idx = detect_start(data, fs, threshold)
+    end_idx = detect_end(data, fs, threshold)
+    filtered_data = data[start_idx:end_idx]
+    bits = decode_bits_with_threshold(filtered_data, fs, bit_duration, bit_threshold)
     return bits
 
 # Main function
@@ -88,13 +107,8 @@ def main():
     # Apply bandpass filter
     filtered_data = bandpass_filter(data, cutoff_low, cutoff_high, fs)
     
-    # Detect the start of the broadcast
-    start_idx = detect_start(filtered_data, fs)
-    filtered_data = filtered_data[start_idx:]
-    print(f"Detected broadcast start at sample index: {start_idx}")
-    
-    # Decode bits from the filtered data
-    bits = decode_bits(filtered_data, fs, bit_duration)
+    # Refine bit detection
+    bits = refine_bit_detection(filtered_data, fs, bit_duration, threshold, bit_threshold)
     print(f"Decoded bits: {''.join(bits)}")
     
     # Calculate and plot spectrogram
