@@ -107,7 +107,7 @@ def decode_bits(data, start_idx, fs, bit_duration):
         intensity_19000 = fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
         intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
         
-        bit_positions.append(i / fs)
+        bit_positions.append(i / fs + bit_duration)
         
         if intensity_20000 > intensity_19000:
             bits.append('1')
@@ -149,7 +149,7 @@ def main(source, filename=None, fs=fs):
     print(f"Detected broadcast end at sample index: {end_idx}")
     
     # Trim the data 2 bit durations before the start
-    start_idx = max(start_idx - 2 * int(bit_duration * fs), 0)
+    start_idx = max(start_idx, 0)
     trimmed_data = filtered_data[start_idx:end_idx]
     
     # Decode bits from the filtered and trimmed data
