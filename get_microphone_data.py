@@ -1,17 +1,18 @@
+import sys
 import sounddevice as sd
+import soundfile as sf
 import numpy as np
-from scipy.signal import butter, filtfilt, spectrogram, welch
+from scipy.signal import butter, filtfilt, spectrogram
 import matplotlib.pyplot as plt
 import time
 
 # Parameters
 duration = 6  # Duration of recording in seconds (slightly longer than the actual broadcast)
 fs = 96000  # Sampling frequency
-bit_duration = 0.05  # Duration of each bit in seconds
+bit_duration = 0.1  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
-threshold = 0.01  # Energy threshold for start detection
-bit_threshold = 1e-7  # Power threshold for bit detection
+amplitude_threshold = 0.9  # Constant amplitude threshold for detecting bits
 
 # Function to design a bandpass filter
 def bandpass_filter(data, cutoff_low, cutoff_high, fs):
@@ -22,8 +23,8 @@ def bandpass_filter(data, cutoff_low, cutoff_high, fs):
     y = filtfilt(b, a, data)
     return y
 
-# Function to calculate and plot spectrogram
-def calculate_spectrogram(data, fs):
+# Function to calculate and plot spectrogram with bit detection lines
+def calculate_spectrogram(data, fs, bit_positions, start_idx, end_idx):
     f, t, Sxx = spectrogram(data, fs, nperseg=1024, noverlap=512)
     
     # Add a small constant to avoid log of zero
@@ -37,6 +38,14 @@ def calculate_spectrogram(data, fs):
     plt.title('Spectrogram (18000-22000 Hz)')
     plt.colorbar(label='Intensity [dB]')
     plt.ylim(18000, 22000)
+    
+    # Add lines for bit positions
+    for bit_time in bit_positions:
+        plt.axvline(x=bit_time, color='red', linestyle='--')
+    
+    plt.axvline(x=start_idx / fs, color='green', linestyle='--', label='Start')
+    plt.axvline(x=end_idx / fs, color='blue', linestyle='--', label='End')
+    plt.legend()
     plt.show()
 
 # Function to get microphone data
@@ -50,52 +59,80 @@ def record_audio(duration, fs):
     print(f"Recording complete. Duration: {elapsed_time:.2f} seconds")
     return data.flatten(), elapsed_time
 
-# Function to detect the start of the broadcast using an energy threshold
-def detect_start(data, fs, threshold=0.01):
-    energy = np.convolve(data**2, np.ones(fs) / fs, mode='same')
-    start_idx = np.argmax(energy > threshold)
-    return start_idx
-
-# Function to detect the end of the broadcast using an energy threshold
-def detect_end(data, fs, threshold=0.01):
-    energy = np.convolve(data**2, np.ones(fs) / fs, mode='same')
-    end_idx = len(energy) - 1 - np.argmax((energy[::-1] > threshold))
-    return end_idx
-
-# Function to decode bits from the audio data using a power threshold
-def decode_bits_with_threshold(data, fs, bit_duration, bit_threshold):
+# Function to detect the start and end of the broadcast using amplitude threshold
+def detect_start_and_end(data, fs, bit_duration, amplitude_threshold):
     num_samples_per_bit = int(bit_duration * fs)
-    num_bits = len(data) // num_samples_per_bit
-    bits = []
+    start_idx = 0
+    end_idx = len(data)
+
+    for i in range(0, len(data) - num_samples_per_bit, num_samples_per_bit):
+        segment = data[i:i + num_samples_per_bit]
+        fft_segment = np.abs(np.fft.rfft(segment))
+        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
+        intensity_19000 = fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
+        
+        if intensity_20000 > amplitude_threshold and intensity_20000 > intensity_19000:
+            next_segment = data[i + num_samples_per_bit:i + 2 * num_samples_per_bit]
+            next_fft_segment = np.abs(np.fft.rfft(next_segment))
+            intensity_19000 = next_fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
+            intensity_19000 = next_fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
+            
+            if intensity_19000 > amplitude_threshold and intensity_20000 < intensity_19000:
+                start_idx = i + num_samples_per_bit // 3
+                break
     
-    for i in range(num_bits):
-        segment = data[i * num_samples_per_bit:(i + 1) * num_samples_per_bit]
+    for i in range(len(data) - num_samples_per_bit, 0, -num_samples_per_bit):
+        segment = data[i - num_samples_per_bit:i]
+        fft_segment = np.abs(np.fft.rfft(segment))
+        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
+        
+        if intensity_20000 > amplitude_threshold:
+            end_idx = i
+            break
+
+    return start_idx, end_idx
+
+# Function to decode bits from the audio data
+def decode_bits(data, start_idx, fs, bit_duration):
+    num_samples_per_bit = int(bit_duration * fs)
+    bits = []
+    bit_positions = []
+
+    for i in range(start_idx, len(data) - num_samples_per_bit, num_samples_per_bit):
+        segment = data[i:i + num_samples_per_bit]
         if len(segment) == 0:
             continue
-        f, Pxx = welch(segment, fs, nperseg=num_samples_per_bit)
-        peak_idx = np.argmax(Pxx)
-        peak_freq = f[peak_idx]
         
-        if Pxx[peak_idx] < bit_threshold:
-            bits.append('0')  # No significant power detected
-        elif abs(peak_freq - 20000) < abs(peak_freq - 19000):
+        fft_segment = np.abs(np.fft.rfft(segment))
+        intensity_19000 = fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
+        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
+        
+        bit_positions.append(i / fs)
+        
+        if intensity_20000 > intensity_19000:
             bits.append('1')
         else:
             bits.append('0')
-    
-    return bits
 
-# Function to refine bit detection
-def refine_bit_detection(data, fs, bit_duration, threshold, bit_threshold):
-    start_idx = detect_start(data, fs, threshold)
-    end_idx = detect_end(data, fs, threshold)
-    filtered_data = data[start_idx:end_idx]
-    bits = decode_bits_with_threshold(filtered_data, fs, bit_duration, bit_threshold)
-    return bits
+    return bits, bit_positions
 
 # Main function
-def main():
-    data, elapsed_time = record_audio(duration, fs)
+def main(source, filename=None, fs=fs):
+    if source == "live":
+        data, elapsed_time = record_audio(duration, fs)
+    elif source == "file":
+        if filename is None:
+            raise ValueError("Filename must be provided when source is 'file'")
+        data, fs = sf.read(filename)
+        elapsed_time = len(data) / fs
+    elif source == "live_save":
+        if filename is None:
+            raise ValueError("Filename must be provided when source is 'live_save'")
+        data, elapsed_time = record_audio(duration, fs)
+        sf.write(filename, data, fs)
+        print(f"Recording saved to {filename}")
+    else:
+        raise ValueError("Invalid source. Must be 'live', 'file', or 'live_save'")
     
     # Calculate the number of samples received per second
     total_samples = len(data)
@@ -106,12 +143,33 @@ def main():
     # Apply bandpass filter
     filtered_data = bandpass_filter(data, cutoff_low, cutoff_high, fs)
     
-    # Refine bit detection
-    bits = refine_bit_detection(filtered_data, fs, bit_duration, threshold, bit_threshold)
+    # Detect start and end of the broadcast
+    start_idx, end_idx = detect_start_and_end(filtered_data, fs, bit_duration, amplitude_threshold)
+    print(f"Detected broadcast start at sample index: {start_idx}")
+    print(f"Detected broadcast end at sample index: {end_idx}")
+    
+    # Trim the data 2 bit durations before the start
+    start_idx = max(start_idx - 2 * int(bit_duration * fs), 0)
+    trimmed_data = filtered_data[start_idx:end_idx]
+    
+    # Decode bits from the filtered and trimmed data
+    bits, bit_positions = decode_bits(trimmed_data, 0, fs, bit_duration)
     print(f"Decoded bits: {''.join(bits)}")
     
-    # Calculate and plot spectrogram
-    calculate_spectrogram(filtered_data, fs)
+    # Calculate and plot spectrogram with bit detection lines
+    calculate_spectrogram(trimmed_data, fs, bit_positions, start_idx, end_idx)
 
 if __name__ == "__main__":
-    main()
+    # Parse command line arguments if running from command line
+    if len(sys.argv) < 2:
+        print("Usage: python your_script.py source [filename]")
+        sys.exit(1)
+
+    source = sys.argv[1]
+    filename = sys.argv[2] if len(sys.argv) > 2 else None
+
+    try:
+        main(source, filename)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
