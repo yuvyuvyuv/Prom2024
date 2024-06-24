@@ -7,12 +7,12 @@ import matplotlib.pyplot as plt
 import time
 
 # Parameters
-duration = 6  # Duration of recording in seconds (slightly longer than the actual broadcast)
+duration = 10  # Duration of recording in seconds (slightly longer than the actual broadcast)
 fs = 96000  # Sampling frequency
 bit_duration = 0.1  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
-amplitude_threshold = 0.9  # Constant amplitude threshold for detecting bits
+amplitude_threshold = 0.1  # Constant amplitude threshold for detecting bits
 
 # Function to design a bandpass filter
 def bandpass_filter(data, cutoff_low, cutoff_high, fs):
