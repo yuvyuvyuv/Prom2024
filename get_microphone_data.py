@@ -5,9 +5,8 @@ import numpy as np
 from scipy.signal import butter, filtfilt, spectrogram, find_peaks
 import matplotlib.pyplot as plt
 import time
-from matplotlib.widgets import Slider
 
-from scipy.io import wavfile
+from tqdm import tqdm, trange
 
 
 # Parameters
@@ -19,12 +18,19 @@ bps = 50 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
-high = 21000
-low = 19000
+f1 = 21000
+f0 = 19000
 
 # TODO!! - change to relevant paramter
 amplitude_threshold = 0.1  # Constant amplitude threshold for detecting bits
 
+
+def fft_cross_correlation(x, y):
+    N = len(x) + len(y) - 1
+    X = np.fft.fft(x, N)
+    Y = np.fft.fft(y, N)
+    corr = np.fft.ifft(X * np.conj(Y))
+    return np.abs(corr)
 
 def bandpass_filter(data, cutoff_low, cutoff_high, fs):
     # Function to design a bandpass filter
@@ -53,8 +59,8 @@ def calculate_spectrogram(data, fs, start_idx=0, end_idx=0, bit_positions=0,show
     plt.ylim(cutoff_low, cutoff_high)
     
     # Add lines for bit positions
-    # for bit_time in bit_positions:
-    #     plt.axvline(x=bit_time, color='red', linestyle='--')
+    for bit_time in bit_positions:
+        plt.axvline(x=bit_time, color='red', linestyle='--')
     print(start_idx / fs,end_idx / fs)
     plt.axvline(x=start_idx / fs, color='green', linestyle='--', label='Start')
     plt.axvline(x=end_idx / fs, color='blue', linestyle='--', label='End')
@@ -73,45 +79,7 @@ def record_audio(duration, fs):
     print(f"Recording complete. Duration: {elapsed_time:.2f} seconds")
     return data.flatten(), elapsed_time
 
-
-
-
-# Function to detect the start and end of the broadcast using amplitude threshold
-def detect_start_and_end(data, fs, bit_duration, amplitude_threshold):
-    num_samples_per_bit = int(bit_duration * fs)
-    start_idx = 0
-    end_idx = len(data)
-
-    for i in range(0, len(data) - num_samples_per_bit, num_samples_per_bit):
-        segment = data[i:i + num_samples_per_bit]
-        fft_segment = np.abs(np.fft.rfft(segment))
-        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
-        intensity_19000 = fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
-        
-        if intensity_20000 > amplitude_threshold and intensity_20000 > intensity_19000:
-            next_segment = data[i + num_samples_per_bit:i + 2 * num_samples_per_bit]
-            next_fft_segment = np.abs(np.fft.rfft(next_segment))
-            intensity_19000 = next_fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
-            intensity_19000 = next_fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
-            
-            if intensity_19000 > amplitude_threshold and intensity_20000 < intensity_19000:
-                start_idx = i + num_samples_per_bit // 3
-                break
-    
-    for i in range(len(data) - num_samples_per_bit, 0, -num_samples_per_bit):
-        segment = data[i - num_samples_per_bit:i]
-        fft_segment = np.abs(np.fft.rfft(segment))
-        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
-        
-        if intensity_20000 > amplitude_threshold:
-            end_idx = i
-            break
-
-    return start_idx, end_idx
-
-
-def detect_signal_start(threshold,signal, preamble_bits, fs,bit_duration, high,low):
-    
+def detect_signal(threshold,signal, preamble_bits, fs,bit_duration, high,low,flip = False):
     preamble = encode_data(preamble_bits,bit_duration,fs,high,low)
     preamble_length = len(preamble)
     signal_length = len(signal)
@@ -122,43 +90,15 @@ def detect_signal_start(threshold,signal, preamble_bits, fs,bit_duration, high,l
     else:
         preamble_extended = preamble[:signal_length]
 
-
     # Cross-correlation using FFT
-    corr = np.fft.fft(signal) * np.conj(np.fft.fft(np.flip(preamble_extended)))
-    corr = np.fft.ifft(corr)
-    """ 
-    # Find correlation index
-    non_zero_corr = corr[corr > 0.1]
-    avg_corr = np.mean(non_zero_corr)
+    corr = fft_cross_correlation(signal,preamble_extended)
 
-    fig, ax = plt.subplots(figsize=(15, 5))
-    plt.subplots_adjust(left=0.1, bottom=0.25)
-    line, = ax.plot(corr, label='Cross-correlation')
-    avg_line = ax.axhline(y=avg_corr, color='r', linestyle='--', label='Average Correlation')
-    peaks, _ = find_peaks(corr, height=avg_corr)
-    peak_line, = ax.plot(peaks, corr[peaks], 'x', label='Detected Peaks')
-    ax.legend()
-
-    axcolor = 'lightgoldenrodyellow'
-    ax_thresh = plt.axes([0.1, 0.1, 0.65, 0.03], facecolor=axcolor)
-    slider_thresh = Slider(ax_thresh, 'Threshold', 0.1 * avg_corr, 2 * avg_corr, valinit=avg_corr)
-
-    def update(val):
-        threshold = slider_thresh.val
-        avg_line.set_ydata(threshold)
-        peaks, _ = find_peaks(corr, height=threshold)
-        peak_line.set_data(peaks, corr[peaks])
-        fig.canvas.draw_idle()
-
-    slider_thresh.on_changed(update)
-    
-    plt.show()
-"""
     # Use the threshold value from the slider for peak detection
-
-    start_index = np.argmax(corr > threshold)  # Take the first peak
+    if flip:
+        index = np.argmax(np.flip(corr)>threshold)
+    index = np.argmax(corr > threshold)  # Take the first peak
     
-    return start_index - preamble_length, corr
+    return index - preamble_length/2 ,corr
 
 # Function to create a sine wave for a given frequency
 def create_tone(freq, duration, fs):
@@ -177,31 +117,40 @@ def encode_data(data, bit_duration, fs, f1, f0):
         signal = np.concatenate((signal, bit_tone))
     return signal
 
+def detect_frequency(segment, fs,f1,f0):
+    # Generate reference sine waves for correlation
+    t = np.arange(len(segment)) / fs
+    ref_wav0 = np.sin(2 * np.pi * f0 * t)
+    ref_wav1 = np.sin(2 * np.pi * f1 * t)
+
+    # Normalize the segment and reference signals
+    segment_norm = segment / np.linalg.norm(segment)
+    ref_wav0_norm = ref_wav0 / np.linalg.norm(ref_wav0)
+    ref_wav1_norm = ref_wav1 / np.linalg.norm(ref_wav1)
+
+    # Compute the correlation using FFT
+    corr0 = fft_cross_correlation(segment_norm, ref_wav0_norm)
+    corr1 = fft_cross_correlation(segment_norm, ref_wav1_norm)
+
+    # Use hypothesis testing to decide the frequency
+    if np.max(corr0) > np.max(corr1):
+        return "0"
+    else:
+        return "1"
 
 
 # Function to decode bits from the audio data
-def decode_bits(data, start_idx, fs, bit_duration):
+def decode_bits(data, bit_positions, fs, bit_duration,f1,f0):
     num_samples_per_bit = int(bit_duration * fs)
     bits = []
-    bit_positions = []
 
-    for i in range(start_idx, len(data) - num_samples_per_bit, num_samples_per_bit):
-        segment = data[i:i + num_samples_per_bit]
+    for start in tqdm(bit_positions):
+        segment = data[start : start + num_samples_per_bit]
         if len(segment) == 0:
             continue
-        
-        fft_segment = np.abs(np.fft.rfft(segment))
-        intensity_19000 = fft_segment[int(19000 * len(fft_segment) / (fs / 2))]
-        intensity_20000 = fft_segment[int(20000 * len(fft_segment) / (fs / 2))]
-        
-        bit_positions.append(i / fs + bit_duration)
-        
-        if intensity_20000 > intensity_19000:
-            bits.append('1')
-        else:
-            bits.append('0')
+        bits.append(detect_frequency(segment,fs,f1,f0))
+    return bits
 
-    return bits, bit_positions
 
 def display_stats(data,filtered_data,corr1,true1,fs):
     # Plot original CSS signal
@@ -245,29 +194,23 @@ def main(source, filename=None, fs=fs):
     else:
         raise ValueError("Invalid source. Must be 'live', 'file', or 'live_save'")
     
-    # Calculate the number of samples received per second
+    threshold = 5
     total_samples = len(data)
     samples_per_second = total_samples / elapsed_time
     print(f"Total samples recorded: {total_samples}")
     print(f"Samples per second: {samples_per_second:.2f}")
     
-    # Apply bandpass filter
     filtered_data = bandpass_filter(data, cutoff_low, cutoff_high, fs)
-    
-    # Detect start and end of the broadcast
-    start_idx, end_idx = detect_start_and_end(filtered_data, fs, bit_duration, amplitude_threshold)
-    print(f"Detected broadcast start at sample index: {start_idx}, at time: {start_idx / samples_per_second}")
-    print(f"Detected broadcast end at sample index: {end_idx}, at time: {end_idx / samples_per_second}")
-    
-    preamble_bits = [1,0,1,0]
-    true1, corr1 = detect_signal_start(.8,filtered_data,[1,0,1],fs,bit_duration,high,low)
-    print(true1,true1/fs)
-    display_stats(data,filtered_data,corr1,true1,fs)
-    # Trim the data 2 bit durations before the start
-    start_idx = max(start_idx, 0)
-    trimmed_data = filtered_data[start_idx:end_idx]
-
-    calculate_spectrogram(filtered_data, fs, true1, true1 + bit_duration*fs/2)
+    start_preamble_bits = [1,0,1,0,1,0,1,0,1,0,1]
+    end_preamble_bits = [0,0,0,0]
+    start_idx,start_corr = detect_signal(threshold, filtered_data, start_preamble_bits, fs, bit_duration, f1, f0)
+    end_idx,end_corr = detect_signal(threshold, filtered_data, end_preamble_bits, fs, bit_duration, f1, f0,True)
+    display_stats(data,filtered_data,start_corr,start_idx,fs)
+    display_stats(data,filtered_data,end_corr,end_idx,fs)
+    bit_positions = np.arange(start_idx/fs, end_idx/fs, bit_duration)
+    calculate_spectrogram(filtered_data, fs, start_idx, end_idx,bit_positions)
+    bits = decode_bits(filtered_data,bit_positions,fs,bit_duration,f1,f0)
+    print(bits)
 
 if __name__ == "__main__":
     # Parse command line arguments if running from command line
@@ -290,22 +233,9 @@ if __name__ == "__main__":
 
 
 
-def fft_cross_correlation(x, y):
-    N = len(x) + len(y) - 1
-    X = np.fft.fft(x, N)
-    Y = np.fft.fft(y, N)
-    corr = np.fft.ifft(X * np.conj(Y))
-    return np.abs(corr)
 
-def decode_bfsk_signal(filtered_signal, fs, f0, f1, preamble_signal, bit_duration, threshold_factor=1.5):
 
-    # Step 4: Detect the start of the preamble using cross-correlation with FFT
-    correlation = fft_cross_correlation(filtered_signal, preamble_signal)
-    peaks, _ = find_peaks(correlation, height=np.max(correlation) * 0.5)
-    start_index = peaks[0]  # Take the first peak
-												 
-    start_time = start_index / fs
-    print("Start of preamble detected at:", start_time, "seconds")
+def decode_bfsk_signal(filtered_signal, fs, f0, f1, start_index, bit_duration, threshold_factor=1.5):
 
     # Step 5: Decode the signal using hypothesis testing
     samples_per_bit = int(bit_duration * fs)
