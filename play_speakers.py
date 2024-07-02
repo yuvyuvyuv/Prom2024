@@ -5,7 +5,7 @@ import sounddevice as sd
 # Parameters
 fs = 96000  # Sampling frequency
 bit_duration = 0.1  # Duration of each bit in seconds
-freq1 = 20000  # Frequency for '1' in Hz
+freq1 = 21000  # Frequency for '1' in Hz
 freq0 = 19000  # Frequency for '0' in Hz
 PREAMBLE = '10101'
 POSTAMBLE = '10101'
