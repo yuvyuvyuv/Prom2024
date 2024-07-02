@@ -19,8 +19,8 @@ duration = 2  # Duration of recording in seconds (slightly longer than the actua
 bps = 50 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
-cutoff_high = 30000
-f1 = 20000
+cutoff_high = 22000
+f1 = 21000
 f0 = 19000
 
 
@@ -36,7 +36,7 @@ def highpass_filter(data, cutoff_low, cutoff_high,fs):
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=4, Wn=[low,high], btype='bandpass')
+    b, a = butter(N=4, Wn=[low, high], btype='bandpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
