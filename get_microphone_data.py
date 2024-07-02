@@ -15,10 +15,10 @@ from bitstring import BitArray
 duration = 2  # Duration of recording in seconds (slightly longer than the actual broadcast)
 fs = 44000  # Sampling frequency
 
-bps = 200 # bits per secondes
+bps = 50 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
-cutoff_high = 21999
+cutoff_high = 22000
 f1 = 21000
 f0 = 19000
 
@@ -38,7 +38,7 @@ def bandpass_filter(data, cutoff_low, cutoff_high, fs):
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=8, Wn=[low, high], btype='bandpass')
+    b, a = butter(N=4, Wn=[low, high], btype='bandpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
@@ -183,7 +183,7 @@ def decode_bits(data, bit_positions, fs, bit_duration,f1,f0, amplitude_ratio):
         segment = data[start : start + num_samples_per_bit]
         if len(segment) == 0:
             continue
-        bits.append(detect_frequency_yuv(segment,fs,f1,f0, amplitude_ratio))
+        bits.append(detect_frequency_jeeves(segment,fs,f1,f0, amplitude_ratio))
     return bits
 
 def write_to_file(bit_str: str) -> None:
