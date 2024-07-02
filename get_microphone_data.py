@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import time
 from scipy.signal import savgol_filter
 from tqdm import tqdm, trange
+from bitstring import BitArray
 
 
 # Parameters
@@ -149,6 +150,10 @@ def decode_bits(data, bit_positions, fs, bit_duration,f1,f0):
         bits.append(detect_frequency(segment,fs,f1,f0))
     return bits
 
+def write_to_file(bit_str: str) -> None:
+    with open("output.txt", "wb") as output:
+        b = BitArray(bin=bit_str)
+        b.tofile(output)
 
 def display_stats(data,filtered_data,corr1,true1,fs):
     # Plot original CSS signal
@@ -173,6 +178,7 @@ def display_stats(data,filtered_data,corr1,true1,fs):
     plt.xlabel('Time (s)')
     plt.ylabel('Correlation')
     plt.show()
+
 
 # Main function
 def main(source, filename=None, fs=fs):
@@ -211,7 +217,8 @@ def main(source, filename=None, fs=fs):
 
     bits = decode_bits(filtered_data,bit_positions,fs,bit_duration,f1,f0)
     print(bits)
-    # calculate_spectrogram(filtered_data, fs, start_idx, end_idx,bit_positions,nperseg=256,noverlap=16)
+    write_to_file(''.join(bits))
+    calculate_spectrogram(filtered_data, fs, start_idx, end_idx,bit_positions,nperseg=256,noverlap=16)
 
 
 if __name__ == "__main__":

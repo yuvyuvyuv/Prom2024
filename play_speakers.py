@@ -1,3 +1,4 @@
+from bitstring import BitArray
 import numpy as np
 import sounddevice as sd
 
@@ -27,7 +28,9 @@ def encode_data(data, bit_duration, fs, freq1, freq0):
 # Main function
 def main():
     # Example data to encode
-    data = '1010100011001110'  # Example bit sequence
+    input_fname = "input.txt"
+    data = BitArray(filename=input_fname).bin  # Example bit sequence
+    print(data)
     
     # Encode the data
     signal = encode_data(data, bit_duration, fs, freq1, freq0)
