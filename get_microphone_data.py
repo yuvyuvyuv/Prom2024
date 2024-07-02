@@ -1,5 +1,5 @@
 import sys
-# import sounddevice as sd
+import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from scipy.signal import butter, filtfilt, spectrogram, find_peaks
@@ -12,13 +12,13 @@ from bitstring import BitArray
 
 # Parameters
 # TODO - change duration to be dynamic
-duration = 10  # Duration of recording in seconds (slightly longer than the actual broadcast)
+duration = 2  # Duration of recording in seconds (slightly longer than the actual broadcast)
 fs = 44000  # Sampling frequency
 
-bps = 50 # bits per secondes
+bps = 200 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
-cutoff_high = 22000
+cutoff_high = 21999
 f1 = 21000
 f0 = 19000
 
@@ -38,7 +38,7 @@ def bandpass_filter(data, cutoff_low, cutoff_high, fs):
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=4, Wn=[low, high], btype='bandpass')
+    b, a = butter(N=8, Wn=[low, high], btype='bandpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
@@ -94,8 +94,12 @@ def detect_signal_edge(signal, preamble_bits, postamble_bits, fs,bit_duration, h
     end_smoothed_corr = np.flip(savgol_filter(end_corr,window_size,3))
     start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/2)
     end_peaks, _ = find_peaks(end_smoothed_corr,width = bit_duration*fs/2)
-    start_idx = start_peaks[0]
-    end_idx = len(signal) - end_peaks[0]
+    start_idx = 0
+    if len(start_peaks) != 0:
+        start_idx = start_peaks[0]
+    end_idx = len(signal)
+    if len(end_peaks) != 0:
+        end_idx = len(signal) - end_peaks[0]
     return start_idx, end_idx, start_corr,end_corr
 
 # Function to create a sine wave for a given frequency
@@ -223,12 +227,11 @@ def main(source, filename=None, fs=fs):
         data, fs = sf.read(filename)
         elapsed_time = len(data) / fs
     elif source == "live_save":
-        pass
-        # if filename is None:
-        #     raise ValueError("Filename must be provided when source is 'live_save'")
-        # data, elapsed_time = record_audio(duration, fs)
-        # sf.write(filename, data, fs)
-        # print(f"Recording saved to {filename}")
+        if filename is None:
+            raise ValueError("Filename must be provided when source is 'live_save'")
+        data, elapsed_time = record_audio(duration, fs)
+        sf.write(filename, data, fs)
+        print(f"Recording saved to {filename}")
     else:
         raise ValueError("Invalid source. Must be 'live', 'file', or 'live_save'")
     
