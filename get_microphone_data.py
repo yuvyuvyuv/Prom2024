@@ -1,9 +1,11 @@
 import sys
-import sounddevice as sd
+# import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from scipy.signal import butter, filtfilt, spectrogram, find_peaks
 import matplotlib.pyplot as plt
+import matplotlib as mlt
+
 import time
 from scipy.signal import savgol_filter
 from tqdm import tqdm, trange
@@ -13,17 +15,13 @@ from bitstring import BitArray
 # Parameters
 # TODO - change duration to be dynamic
 duration = 2  # Duration of recording in seconds (slightly longer than the actual broadcast)
-fs = 44000  # Sampling frequency
 
-bps = 200 # bits per secondes
+bps = 50 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
-cutoff_high = 21999
-f1 = 21000
+cutoff_high = 30000
+f1 = 20000
 f0 = 19000
-
-# TODO!! - change to relevant paramter
-amplitude_threshold = 0.1  # Constant amplitude threshold for detecting bits
 
 
 def fft_cross_correlation(x, y):
@@ -33,16 +31,16 @@ def fft_cross_correlation(x, y):
     corr = np.fft.ifft(X * np.conj(Y))
     return np.abs(corr)
 
-def bandpass_filter(data, cutoff_low, cutoff_high, fs):
+def highpass_filter(data, cutoff_low, cutoff_high,fs):
     # Function to design a bandpass filter
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=8, Wn=[low, high], btype='bandpass')
+    b, a = butter(N=4, Wn=[low,high], btype='bandpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
-def calculate_spectrogram(data, fs,bits, bit_positions=0,show=True,nperseg=128, noverlap=64):
+def calculate_spectrogram(data,bits,fs, bit_positions=0,nperseg=128, noverlap=64):
     start_idx = bit_positions[0] 
     end_idx = bit_positions[-1]
     # TODO!! - calculate relevant nprseg and noverlap
@@ -59,20 +57,19 @@ def calculate_spectrogram(data, fs,bits, bit_positions=0,show=True,nperseg=128, 
     plt.title(f'Spectrogram ({cutoff_low}-{cutoff_high} Hz)')
     plt.colorbar(label='Intensity [dB]')
     plt.ylim(cutoff_low, cutoff_high)
-    plt.xlim(start_idx/fs-2*bit_duration, end_idx/fs+3*bit_duration)
+    plt.xlim((start_idx/fs-2*bit_duration)/1.4, end_idx/fs+3*bit_duration)
     # Add lines for bit positions
     for i,bit_time in enumerate(bit_positions):
         plt.axvline(x=bit_time/fs, color='red', linestyle='--')
-        plt.text(bit_time/fs, cutoff_high - 50, bits[i], rotation=0, verticalalignment='bottom')
-    print(start_idx / fs,end_idx / fs)
+        plt.text(bit_time/fs, (f1+f0)/2,bits[i])
     plt.axvline(x=start_idx / fs, color='green', linestyle='--', label='Start')
     plt.axvline(x=end_idx / fs, color='blue', linestyle='--', label='End')
+    plt.gca().margins(y=0.2)
     plt.legend()
-    if show:
-        plt.show()
+    plt.show()
 
 # Function to get microphone data
-def record_audio(duration, fs):
+def record_audio(fs):
     print("Recording...")
     start_time = time.time()
     data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float64')
@@ -82,18 +79,18 @@ def record_audio(duration, fs):
     print(f"Recording complete. Duration: {elapsed_time:.2f} seconds")
     return data.flatten(), elapsed_time
 
-def detect_signal_edge(signal, preamble_bits, postamble_bits, fs,bit_duration, high,low,end = False):
-    preamble = encode_data(preamble_bits,bit_duration,fs,high,low)
-    postamble = encode_data(postamble_bits,bit_duration,fs,high,low)
+def detect_signal_edge(signal, preamble_bits, postamble_bits,fs):
+    preamble = encode_data(preamble_bits,fs)
+    postamble = encode_data(postamble_bits,fs)
     # Cross-correlation using FFT
     start_corr = fft_cross_correlation(signal,preamble)
     end_corr = fft_cross_correlation(signal,postamble)
 
-    window_size = 10
+    window_size = 100
     start_smoothed_corr = savgol_filter(start_corr,window_size,3)
     end_smoothed_corr = np.flip(savgol_filter(end_corr,window_size,3))
-    start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/2)
-    end_peaks, _ = find_peaks(end_smoothed_corr,width = bit_duration*fs/2)
+    start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/2,height=1)
+    end_peaks, _ = find_peaks(end_smoothed_corr,width = bit_duration*fs/2,height=1)
     start_idx = 0
     if len(start_peaks) != 0:
         start_idx = start_peaks[0]
@@ -103,23 +100,23 @@ def detect_signal_edge(signal, preamble_bits, postamble_bits, fs,bit_duration, h
     return start_idx, end_idx, start_corr,end_corr
 
 # Function to create a sine wave for a given frequency
-def create_tone(freq, duration, fs):
+def create_tone(freq, duration,fs):
     t = np.linspace(0, duration, int(fs * duration), endpoint=False)
     tone = 0.5 * np.sin(2 * np.pi * freq * t)
     return tone
 
 # Function to encode data as an audio signal
-def encode_data(data, bit_duration, fs, f1, f0):
+def encode_data(data,fs):
     signal = np.array([])
     for bit in data:
         if bit == 1:
-            bit_tone = create_tone(f1, bit_duration, fs)
+            bit_tone = create_tone(f1, bit_duration,fs)
         else:
-            bit_tone = create_tone(f0, bit_duration, fs)
+            bit_tone = create_tone(f0, bit_duration,fs)
         signal = np.concatenate((signal, bit_tone))
     return signal
 
-def detect_frequency_yuv(segment, fs,f1,f0, amplitude_ratio = 1):
+def detect_frequency_yuv(segment, fs,amplitude_ratio = 1):
     # Generate reference sine waves for correlation
     t = np.arange(len(segment)) / fs
     ref_wav0 = np.sin(2 * np.pi * f0 * t)
@@ -140,7 +137,7 @@ def detect_frequency_yuv(segment, fs,f1,f0, amplitude_ratio = 1):
         return "1"
 
 
-def calculate_amplitude_ratio(filtered_data, start_idx, bit_duration, fs, f1, f0):
+def calculate_amplitude_ratio(filtered_data, start_idx,fs):
     num_samples_per_bit = int(bit_duration * fs)
     segment_0 = filtered_data[start_idx: start_idx + num_samples_per_bit]
     segment_1 = filtered_data[start_idx + num_samples_per_bit: start_idx + 2 * num_samples_per_bit]
@@ -158,7 +155,7 @@ def calculate_amplitude_ratio(filtered_data, start_idx, bit_duration, fs, f1, f0
     ratio = amplitude_0 / amplitude_1
     return ratio
 
-def detect_frequency_jeeves(segment, fs, f1, f0, amplitude_ratio):
+def detect_frequency_jeeves(segment, fs,amplitude_ratio):
     t = np.arange(len(segment)) / fs
     ref_wav0 = np.sin(2 * np.pi * f0 * t)
     ref_wav1 = np.sin(2 * np.pi * f1 * t)
@@ -175,7 +172,7 @@ def detect_frequency_jeeves(segment, fs, f1, f0, amplitude_ratio):
         return '1'
 
 # Function to decode bits from the audio data
-def decode_bits(data, bit_positions, fs, bit_duration,f1,f0, amplitude_ratio):
+def decode_bits(data, bit_positions,fs, amplitude_ratio):
     num_samples_per_bit = int(bit_duration * fs)
     bits = []
 
@@ -183,7 +180,7 @@ def decode_bits(data, bit_positions, fs, bit_duration,f1,f0, amplitude_ratio):
         segment = data[start : start + num_samples_per_bit]
         if len(segment) == 0:
             continue
-        bits.append(detect_frequency_yuv(segment,fs,f1,f0, amplitude_ratio))
+        bits.append(detect_frequency_jeeves(segment,fs,amplitude_ratio))
     return bits
 
 def write_to_file(bit_str: str) -> None:
@@ -191,7 +188,7 @@ def write_to_file(bit_str: str) -> None:
         b = BitArray(bin=bit_str)
         b.tofile(output)
 
-def display_stats(data,filtered_data,corr1,start_idx,fs):
+def display_stats(data,filtered_data,corr,start_idx,fs):
     # Plot original CSS signal
     plt.subplot(3, 1, 1)
     plt.plot(np.arange(len(data)) / fs, data)
@@ -208,7 +205,7 @@ def display_stats(data,filtered_data,corr1,start_idx,fs):
 
     # Plot correlation result
     plt.subplot(3, 1, 3)
-    plt.plot(np.arange(len(corr1)) / fs, np.abs(corr1))
+    plt.plot(np.arange(len(corr)) / fs, np.abs(corr))
     plt.axvline(x=start_idx/fs, color='r', linestyle='--', label='Average Correlation')
     plt.title('Correlation with Preamble')
     plt.xlabel('Time (s)')
@@ -217,7 +214,8 @@ def display_stats(data,filtered_data,corr1,start_idx,fs):
 
 
 # Main function
-def main(source, filename=None, fs=fs):
+def main(source, filename=None):
+    fs = 44000
     if source == "live":
         pass
         # data, elapsed_time = record_audio(duration, fs)
@@ -234,28 +232,24 @@ def main(source, filename=None, fs=fs):
         print(f"Recording saved to {filename}")
     else:
         raise ValueError("Invalid source. Must be 'live', 'file', or 'live_save'")
+
+    print(f"bps: {bps},   fs: {fs:.2f}")
     
-    threshold = 10
-    total_samples = len(data)
-    samples_per_second = total_samples / elapsed_time
-    print(f"Total samples recorded: {total_samples}")
-    print(f"Samples per second: {samples_per_second:.2f}")
-    
-    filtered_data = bandpass_filter(data, cutoff_low, cutoff_high, fs)
+    filtered_data = highpass_filter(data, cutoff_low, cutoff_high,fs)
     start_preamble_bits = [1,0,1,0,1]
     end_preamble_bits = start_preamble_bits
 
     start_idx, end_idx, start_corr,end_corr = detect_signal_edge(filtered_data,
-                    start_preamble_bits,end_preamble_bits, fs, bit_duration, f1, f0)
+                    start_preamble_bits,end_preamble_bits,fs)
     display_stats(data,filtered_data,start_corr,start_idx,fs)
     bit_positions = np.arange(start_idx, end_idx, int(bit_duration*fs))
-    amplitude_ratio = calculate_amplitude_ratio(filtered_data, start_idx, bit_duration, fs, f1, f0)
+    amplitude_ratio = calculate_amplitude_ratio(filtered_data, start_idx,fs)
     print(f"Amplitude Ratio: {amplitude_ratio}")
 
-    bits = decode_bits(filtered_data,bit_positions,fs,bit_duration,f1,f0, amplitude_ratio)
+    bits = decode_bits(filtered_data,bit_positions,fs,amplitude_ratio)
     print(bits)
     write_to_file(''.join(bits))
-    calculate_spectrogram(filtered_data, fs, bits,bit_positions,nperseg=256,noverlap=16)
+    calculate_spectrogram(filtered_data, bits,fs,bit_positions,nperseg=256,noverlap=16)
 
 
 if __name__ == "__main__":
