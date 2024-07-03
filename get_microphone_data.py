@@ -1,11 +1,14 @@
 import sys
-# import sounddevice as sd
+import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from scipy.signal import butter, filtfilt, spectrogram, find_peaks
 import matplotlib.pyplot as plt
 import matplotlib as mlt
-
+from ipywidgets import widgets, interact, fixed
+from IPython.display import display
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, Button
 import time
 from scipy.signal import savgol_filter
 from tqdm import tqdm, trange
@@ -16,7 +19,7 @@ from bitstring import BitArray
 # TODO - change duration to be dynamic
 duration = 2  # Duration of recording in seconds (slightly longer than the actual broadcast)
 
-bps = 50 # bits per secondes
+bps = 100 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
@@ -36,40 +39,82 @@ def highpass_filter(data, cutoff_low, cutoff_high,fs):
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=4, Wn=[low, high], btype='bandpass')
+    b, a = butter(N=4, Wn=low, btype='highpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
-def calculate_spectrogram(data,bits,fs, bit_positions=0,nperseg=128, noverlap=64):
-    start_idx = bit_positions[0] 
-    end_idx = bit_positions[-1]
-    # TODO!! - calculate relevant nprseg and noverlap
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, Button
+from scipy.signal import spectrogram
+
+def calculate_spectrogram(data, fs, start_idx=0, end_idx=0, bit_positions=None, nperseg=128, noverlap=64):
+    # Calculate the spectrogram
     f, t, Sxx = spectrogram(data, fs, nperseg=nperseg, noverlap=noverlap)
-    
-    # Add a small constant to avoid log of zero
-    Sxx += 1e-10
-    plt.style.use('dark_background')
-    # Plot the spectrogram
-    plt.figure(figsize=(10, 5))
-    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
-    plt.ylabel('Frequency [Hz]')
-    plt.xlabel('Time [s]')
-    plt.title(f'Spectrogram ({cutoff_low}-{cutoff_high} Hz)')
-    plt.colorbar(label='Intensity [dB]')
-    plt.ylim(cutoff_low, cutoff_high)
-    plt.xlim((start_idx/fs-2*bit_duration)/1.4, end_idx/fs+3*bit_duration)
-    # Add lines for bit positions
-    for i,bit_time in enumerate(bit_positions):
-        plt.axvline(x=bit_time/fs, color='red', linestyle='--')
-        plt.text(bit_time/fs, (f1+f0)/2,bits[i])
-    plt.axvline(x=start_idx / fs, color='green', linestyle='--', label='Start')
-    plt.axvline(x=end_idx / fs, color='blue', linestyle='--', label='End')
-    plt.gca().margins(y=0.2)
-    plt.legend()
+    Sxx += 1e-10  # Add a small constant to avoid log of zero
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plt.subplots_adjust(left=0.1, bottom=0.25)
+
+    psm = ax.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
+    fig.colorbar(psm, ax=ax, label='Intensity [dB]')
+    ax.set_ylabel('Frequency [Hz]')
+    ax.set_xlabel('Time [s]')
+    ax.set_title(f'Spectrogram ({cutoff_low}-{cutoff_high} Hz)')
+    ax.set_ylim(cutoff_low, cutoff_high)
+
+    start_line = ax.axvline(x=start_idx / fs, color='green', linestyle='--', label='Start')
+    end_line = ax.axvline(x=end_idx / fs, color='blue', linestyle='--', label='End')
+    if bit_positions is not None:
+        for bit_time in bit_positions:
+            ax.axvline(x=bit_time / fs, color='red', linestyle='--')
+    ax.legend()
+
+    ax_slider_start = plt.axes([0.1, 0.05, 0.65, 0.03], facecolor='lightgoldenrodyellow')
+    start_slider = Slider(ax_slider_start, 'Start', 0, len(data) / fs, valinit=start_idx / fs)
+
+    def update_start(val):
+        start_idx = int(start_slider.val * fs)
+        start_line.set_xdata([start_idx / fs])
+        fig.canvas.draw_idle()
+
+    start_slider.on_changed(update_start)
+
+    ax_slider_end = plt.axes([0.1, 0.1, 0.65, 0.03], facecolor='lightgoldenrodyellow')
+    end_slider = Slider(ax_slider_end, 'End', 0, len(data) / fs, valinit=end_idx / fs)
+
+    def update_end(val):
+        end_idx = int(end_slider.val * fs)
+        end_line.set_xdata([end_idx / fs])
+        fig.canvas.draw_idle()
+
+    end_slider.on_changed(update_end)
+    resetax = plt.axes([0.8, 0.025, 0.1, 0.04])
+    button = Button(resetax, 'Recalculate', color='lightgoldenrodyellow', hovercolor='0.975')
+
+    def recalculate(event):
+        new_start_idx = int(start_slider.val * fs)
+        new_end_idx = int(end_slider.val * fs)
+        print(f"Recalculating with new start index: {new_start_idx}")
+        # Here, you can call your data processing and bit decoding functions with the new start index
+        # For example:
+        # bits = decode_bits(data[new_start_idx:end_idx], fs, bit_duration, f1, f0)
+        # print(f"Decoded bits: {''.join(bits)}")
+        
+        bit_positions = np.arange(new_start_idx, new_end_idx, int(bit_duration*fs))
+        amplitude_ratio = calculate_amplitude_ratio(data, new_start_idx,fs)
+        print(f"Amplitude Ratio: {amplitude_ratio}")
+
+        bits = decode_bits(data,bit_positions,fs,amplitude_ratio)
+        print(bits)
+        write_to_file(''.join(bits))
+        calculate_spectrogram(data, fs, new_start_idx, new_end_idx, bit_positions=bit_positions, nperseg=128, noverlap=16)
+
+    button.on_clicked(recalculate)
+
     plt.show()
 
 # Function to get microphone data
-def record_audio(fs):
+def record_audio(duration, fs):
     print("Recording...")
     start_time = time.time()
     data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float64')
@@ -86,7 +131,7 @@ def detect_signal_edge(signal, preamble_bits, postamble_bits,fs):
     start_corr = fft_cross_correlation(signal,preamble)
     end_corr = fft_cross_correlation(signal,postamble)
 
-    window_size = 100
+    window_size = int(bit_duration * fs // 16)
     start_smoothed_corr = savgol_filter(start_corr,window_size,3)
     end_smoothed_corr = np.flip(savgol_filter(end_corr,window_size,3))
     start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/2,height=1)
@@ -102,6 +147,7 @@ def detect_signal_edge(signal, preamble_bits, postamble_bits,fs):
 # Function to create a sine wave for a given frequency
 def create_tone(freq, duration,fs):
     t = np.linspace(0, duration, int(fs * duration), endpoint=False)
+    # t[-len(t)//2:]
     tone = 0.5 * np.sin(2 * np.pi * freq * t)
     return tone
 
@@ -188,7 +234,8 @@ def write_to_file(bit_str: str) -> None:
         b = BitArray(bin=bit_str)
         b.tofile(output)
 
-def display_stats(data,filtered_data,corr,start_idx,fs):
+def display_stats(data, filtered_data, corr1, start_idx, fs):
+    plt.figure(figsize=(10, 8))  # Adjust the figure size if needed
     # Plot original CSS signal
     plt.subplot(3, 1, 1)
     plt.plot(np.arange(len(data)) / fs, data)
@@ -205,11 +252,12 @@ def display_stats(data,filtered_data,corr,start_idx,fs):
 
     # Plot correlation result
     plt.subplot(3, 1, 3)
-    plt.plot(np.arange(len(corr)) / fs, np.abs(corr))
-    plt.axvline(x=start_idx/fs, color='r', linestyle='--', label='Average Correlation')
+    plt.plot(np.arange(len(corr1)) / fs, np.abs(corr1))
+    plt.axvline(x=start_idx / fs, color='r', linestyle='--', label='Average Correlation')
     plt.title('Correlation with Preamble')
     plt.xlabel('Time (s)')
     plt.ylabel('Correlation')
+    plt.legend()
     plt.show()
 
 
@@ -249,7 +297,7 @@ def main(source, filename=None):
     bits = decode_bits(filtered_data,bit_positions,fs,amplitude_ratio)
     print(bits)
     write_to_file(''.join(bits))
-    calculate_spectrogram(filtered_data, bits,fs,bit_positions,nperseg=256,noverlap=16)
+    calculate_spectrogram(filtered_data, fs, start_idx, end_idx, bit_positions=bit_positions, nperseg=128, noverlap=16)
 
 
 if __name__ == "__main__":
