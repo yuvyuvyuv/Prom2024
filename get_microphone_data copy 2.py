@@ -248,30 +248,6 @@ def decode_bits(data, bit_positions,fs, amplitude_ratio):
         bits.append(detect_frequency_jeeves(segment,fs,amplitude_ratio))
     return bits
 
-def hamming_decode(data):
-    decoded_data = ''
-    for i in range(0, len(data), 7):
-        byte = data[i:i+7]
-        p1 = int(byte[0])
-        p2 = int(byte[1])
-        d1 = int(byte[2])
-        p3 = int(byte[3])
-        d2 = int(byte[4])
-        d3 = int(byte[5])
-        d4 = int(byte[6])
-
-        c1 = (p1 + d1 + d2 + d4) % 2
-        c2 = (p2 + d1 + d3 + d4) % 2
-        c3 = (p3 + d2 + d3 + d4) % 2
-
-        error_pos = c1 + (c2 << 1) + (c3 << 2)
-
-        if error_pos != 0:
-            byte = byte[:error_pos-1] + str((int(byte[error_pos-1]) + 1) % 2) + byte[error_pos:]
-
-        decoded_data += byte[2] + byte[4] + byte[5] + byte[6]
-    return decoded_data
-
 def write_to_file(bit_str: str) -> None:
     with open("output.txt", "wb") as output:
         b = BitArray(bin=bit_str)
@@ -337,8 +313,6 @@ def main(source, filename=None):
     print(f"Amplitude Ratio: {amplitude_ratio}")
 
     bits = decode_bits(filtered_data,bit_positions,fs,amplitude_ratio)
-    bits = bits[len(PREAMBLE):-len(POSTAMBLE)]
-    bits = hamming_decode(bits)
     print(f"{''.join(bits[::2])}\n{''.join(bits[1::2])}")
     print(f"{''.join(bits)}")
     write_to_file(''.join(bits))
