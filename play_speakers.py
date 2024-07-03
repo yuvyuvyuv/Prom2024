@@ -28,11 +28,24 @@ def encode_data(data, bit_duration, fs, freq1, freq0):
         signal = np.concatenate((signal, tone))
     return signal
 
+def hamming_encode(data):
+    encoded_data = ''
+    for i in range(0, len(data), 4):
+        nibble = data[i:i+4]
+        while len(nibble) < 4:
+            nibble += '0'
+        p1 = str((int(nibble[0]) + int(nibble[1]) + int(nibble[3])) % 2)
+        p2 = str((int(nibble[0]) + int(nibble[2]) + int(nibble[3])) % 2)
+        p3 = str((int(nibble[1]) + int(nibble[2]) + int(nibble[3])) % 2)
+        encoded_data += p1 + p2 + nibble[0] + p3 + nibble[1] + nibble[2] + nibble[3]
+    return encoded_data
+
 # Main function
 def main():
     # Example data to encode
     input_fname = "input.txt"
     data = BitArray(filename=input_fname).bin  # Example bit sequence
+    data = hamming_encode(data)
     print(data)
     data = PREAMBLE + str(data) + POSTAMBLE
     
