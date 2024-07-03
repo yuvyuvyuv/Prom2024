@@ -4,7 +4,6 @@ import soundfile as sf
 import numpy as np
 from scipy.signal import butter, filtfilt, spectrogram, find_peaks
 import matplotlib.pyplot as plt
-import matplotlib as mlt
 
 import time
 from scipy.signal import savgol_filter
@@ -36,7 +35,7 @@ def highpass_filter(data, cutoff_low, cutoff_high,fs):
     nyquist = 0.5 * fs
     low = cutoff_low / nyquist
     high = cutoff_high / nyquist
-    b, a = butter(N=4, Wn=[low, high], btype='bandpass')
+    b, a = butter(N=4, Wn=low, btype='highpass')
     return filtfilt(b, a, data)
 
 # Function to calculate and plot spectrogram with bit detection lines
@@ -69,7 +68,7 @@ def calculate_spectrogram(data,bits,fs, bit_positions=0,nperseg=128, noverlap=64
     plt.show()
 
 # Function to get microphone data
-def record_audio(fs):
+def record_audio(duration, fs):
     print("Recording...")
     start_time = time.time()
     data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float64')
@@ -86,11 +85,12 @@ def detect_signal_edge(signal, preamble_bits, postamble_bits,fs):
     start_corr = fft_cross_correlation(signal,preamble)
     end_corr = fft_cross_correlation(signal,postamble)
 
-    window_size = 100
+    window_size = int(bit_duration*fs/4)
+
     start_smoothed_corr = savgol_filter(start_corr,window_size,3)
     end_smoothed_corr = np.flip(savgol_filter(end_corr,window_size,3))
-    start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/2,height=1)
-    end_peaks, _ = find_peaks(end_smoothed_corr,width = bit_duration*fs/2,height=1)
+    start_peaks, _ = find_peaks(start_smoothed_corr,width = bit_duration*fs/4,height=1)
+    end_peaks, _ = find_peaks(end_smoothed_corr,width = bit_duration*fs/4,height=1)
     start_idx = 0
     if len(start_peaks) != 0:
         start_idx = start_peaks[0]
@@ -127,10 +127,24 @@ def detect_frequency_yuv(segment, fs,amplitude_ratio = 1):
     ref_wav0_norm = ref_wav0 / np.linalg.norm(ref_wav0)
     ref_wav1_norm = ref_wav1 / np.linalg.norm(ref_wav1)
 
-    val0 = np.linalg.norm(segment_norm - ref_wav0_norm)
-    val1 = np.linalg.norm(segment_norm - ref_wav1_norm)
-
-    print(val0,val1)
+    # val0 = np.linalg.norm(segment_norm - ref_wav0_norm)
+    # val1 = np.linalg.norm(segment_norm - ref_wav1_norm)
+    # plt.plot(segment_norm)
+    # plt.plot(ref_wav0_norm)
+    # plt.plot(ref_wav1_norm)
+    window_length = 150
+    cor0 = fft_cross_correlation(segment_norm,ref_wav0_norm)
+    cor1 = fft_cross_correlation(segment_norm,ref_wav1_norm)
+    cor0s = savgol_filter(cor0,window_length,3)
+    cor1s = savgol_filter(cor1,window_length,3)
+    # plt.plot(cor0s)
+    # plt.plot(cor1s)
+    # val0 = np.dot(ref_wav0_norm, segment_norm) #/ (np.linalg.norm(ref_wav0_norm) * np.linalg.norm(segment_norm))
+    # val1 = np.dot(ref_wav1_norm, segment_norm) *amplitude_ratio#/ (np.linalg.norm(ref_wav1_norm) * np.linalg.norm(segment_norm))
+    # print(val0,val1)
+    val0 = np.mean(cor0s)
+    val1 = np.mean(cor1s)
+    
     if val0 > val1:
         return "0"
     else:
@@ -217,8 +231,7 @@ def display_stats(data,filtered_data,corr,start_idx,fs):
 def main(source, filename=None):
     fs = 44000
     if source == "live":
-        pass
-        # data, elapsed_time = record_audio(duration, fs)
+        data, elapsed_time = record_audio(duration, fs)
     elif source == "file":
         if filename is None:
             raise ValueError("Filename must be provided when source is 'file'")
@@ -247,7 +260,7 @@ def main(source, filename=None):
     print(f"Amplitude Ratio: {amplitude_ratio}")
 
     bits = decode_bits(filtered_data,bit_positions,fs,amplitude_ratio)
-    print(bits)
+    print(''.join(bits))
     write_to_file(''.join(bits))
     calculate_spectrogram(filtered_data, bits,fs,bit_positions,nperseg=256,noverlap=16)
 
