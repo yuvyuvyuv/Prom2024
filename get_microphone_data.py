@@ -17,9 +17,9 @@ from bitstring import BitArray
 
 # Parameters
 # TODO - change duration to be dynamic
-duration = 2  # Duration of recording in seconds (slightly longer than the actual broadcast)
+duration = 7  # Duration of recording in seconds (slightly longer than the actual broadcast)
 
-bps = 100 # bits per secondes
+bps = 50 # bits per secondes
 bit_duration = 1/bps  # Duration of each bit in seconds
 cutoff_low = 18000
 cutoff_high = 22000
@@ -48,7 +48,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 from scipy.signal import spectrogram
 
-def calculate_spectrogram(data, fs, start_idx=0, end_idx=0, bit_positions=None, nperseg=128, noverlap=64):
+def calculate_spectrogram(data, fs, start_idx=0, end_idx=0, bit_positions=None, nperseg=80, noverlap=30):
     # Calculate the spectrogram
     f, t, Sxx = spectrogram(data, fs, nperseg=nperseg, noverlap=noverlap)
     Sxx += 1e-10  # Add a small constant to avoid log of zero
@@ -106,16 +106,17 @@ def calculate_spectrogram(data, fs, start_idx=0, end_idx=0, bit_positions=None, 
         print(f"Amplitude Ratio: {amplitude_ratio}")
 
         bits = decode_bits(data,bit_positions,fs,amplitude_ratio)
-        print(bits)
+        print(f"{''.join(bits[::2])}\n{''.join(bits[1::2])}")
+        print(f"{''.join(bits)}")
         write_to_file(''.join(bits))
-        calculate_spectrogram(data, fs, new_start_idx, new_end_idx, bit_positions=bit_positions, nperseg=128, noverlap=16)
+        calculate_spectrogram(data, fs, new_start_idx, new_end_idx, bit_positions=bit_positions)
 
     button.on_clicked(recalculate)
 
     plt.show()
 
 # Function to get microphone data
-def record_audio(duration, duration, fs):
+def record_audio(duration, fs):
     print("Recording...")
     start_time = time.time()
     data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='float64')
@@ -223,7 +224,7 @@ def detect_frequency_jeeves(segment, fs,amplitude_ratio):
     ref_wav1 = np.sin(2 * np.pi * f1 * t)
 
     corr0 = np.correlate(segment, ref_wav0, mode='valid')
-    corr1 = np.correlate(segment, ref_wav1, mode='valid')
+    corr1 = np.correlate(segment, ref_wav1, mode='valid') * 0.7
 
     max_corr0 = np.max(corr0)
     max_corr1 = np.max(corr1) * amplitude_ratio
@@ -238,7 +239,9 @@ def decode_bits(data, bit_positions,fs, amplitude_ratio):
     num_samples_per_bit = int(bit_duration * fs)
     bits = []
 
-    for start in tqdm(bit_positions):
+    for i, start in enumerate(tqdm(bit_positions)):
+        # amplitude_ratio *= (len(bit_positions) - i) / len(bit_positions)
+        # amplitude_ratio = max(amplitude_ratio, 1)
         segment = data[start : start + num_samples_per_bit]
         if len(segment) == 0:
             continue
@@ -310,9 +313,10 @@ def main(source, filename=None):
     print(f"Amplitude Ratio: {amplitude_ratio}")
 
     bits = decode_bits(filtered_data,bit_positions,fs,amplitude_ratio)
-    print(''.join(bits))
+    print(f"{''.join(bits[::2])}\n{''.join(bits[1::2])}")
+    print(f"{''.join(bits)}")
     write_to_file(''.join(bits))
-    calculate_spectrogram(filtered_data, fs, start_idx, end_idx, bit_positions=bit_positions, nperseg=128, noverlap=16)
+    calculate_spectrogram(filtered_data, fs, start_idx, end_idx, bit_positions=bit_positions)
 
 
 if __name__ == "__main__":
